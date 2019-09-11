@@ -194,12 +194,12 @@ class SQLAlchemyStorage(BaseStorage):
 
     def set(self, blueprint, token, user=None, user_id=None):
         uid = first([user_id, self.user_id, blueprint.config.get("user_id")])
-        u = first(
+        user = first(
             _get_real_user(ref, self.anon_user)
             for ref in (user, self.user, blueprint.config.get("user"))
         )
 
-        if self.user_required and not u and not uid:
+        if self.user_required and not user and not uid:
             raise ValueError("Cannot set OAuth token without an associated user")
 
         # if there was an existing model, delete it
@@ -212,17 +212,19 @@ class SQLAlchemyStorage(BaseStorage):
             existing_query = existing_query.filter_by(user_id=uid)
         # check for user (relationship property)
         has_user = hasattr(self.model, "user")
-        if has_user and u:
-            existing_query = existing_query.filter_by(user=u)
+        if has_user and user:
+            existing_query = existing_query.filter_by(user=user)
         # queue up delete query -- won't be run until commit()
-        existing_query.delete()
+        oauth = existing_query.one_or_none()
         # create a new model for this token
         kwargs = {"provider": blueprint.name, "token": token}
         if has_user_id and uid:
             kwargs["user_id"] = uid
-        if has_user and u:
-            kwargs["user"] = u
-        self.session.add(self.model(**kwargs))
+        if has_user and user:
+            kwargs["user"] = user
+        for arg in kwargs:
+            oauth.__setattr__(arg, kwargs[arg])
+        self.session.add(oauth)
         # commit to delete and add simultaneously
         self.session.commit()
         # invalidate cache
